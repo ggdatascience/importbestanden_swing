@@ -1,9 +1,19 @@
 # R Script voor het aanmaken van Swing importbestanden in 'long' format (platte data)
-# Tabblad 1 van de output bevat de data voor Swing
-# Tabblad 2 van de output bevat de metadata voor Swing
+
+# Dit script genereert twee bestanden.
+# Bestand 1 bevat alle resultaten (waaronder berekende gemiddelden, N, N1, N0)
+# Bestand 2 bevat een swingimportbestand met twee tabbladen, waarbij:
+  # Tabblad 1 de platte Swing data bevat
+  # Tabblad 2 de metadata bevat
+
+
+# 0. Voorbereiding --------------------------------------------------------
 
 # Leegmaken Global Environment
 rm(list=ls())
+
+
+# 1. Laden benodigde packages --------------------------------------------
 
 # Laden van packages
 library(tidyverse) # tidyverse package biedt basis functionaliteit
@@ -13,23 +23,53 @@ library(haven) # voor read_spss(), zap_label() en zap_labels()
 library(labelled) # voor to_character()
 library(fastDummies) # voor dummy_cols()
 
+
+# 2. Definieren minimum aantallen -----------------------------------------
+
 # Is deze groep kleiner dan het aangegeven aantal dan wordt deze waarde op missing (-99996) gezet.
+# De ingevulde waarden zijn gebaseerd op de landelijke afspraken. Indien gewenst kunnen de aantallen
+# worden aangepast. Zo betekent een mininum N per cel van 0 dat er percentages uit kunnen komen die 
+# 0% of 100% zijn binnen een bepaalde groep.
+
 # Minimum aantal respondenten per variabele
 minimum_N <- 50
 
 # Minimum aantal respondenten per cel/percentage
 minimum_N_cel <- 0
 
-# Een (zelfgekozen) mapnaam die wordt aangemaakt in de huidige working directory. Hier worden de resultaten opgeslagen.
+
+# 3. Definieren regionaam en -code ----------------------------------------
+# KL: stap 3 stond niet in originele script > toegevoegd vanuit rapportage-script
+
+# Pas onderstaande naam en code aan naar de naam en code van je eigen regio.
+regionaam <- 'GGD Limburg-Noord'
+regiocode <- 23
+
+
+# 4. Doelmap aanmaken ----------------------------------------
+
+# Stel de working directory in op de map waar je de resultaten wilt opslaan. Het is het handigst als dit de map is waar ook het indicatorenoverzicht staat.
+# Pas het deel tussen '' aan.
+setwd('Q:/vul/hier/de/juiste/padnaam/in')
+
+# Een (zelfgekozen) mapnaam die wordt aangemaakt in de hierboven opgegeven working directory. Hier worden de resultaten opgeslagen.
+# Pas de naam tussen '' aan als je de map een andere naam wilt geven.
 mapnaam <- 'Output Resultaten'
 
 # Aanmaken map 
 dir.create(mapnaam)
 
-# Definiëren van de bron die wordt weergegeven in de swing metadata
-bron <- 'gmvo'
+
+# 5. Bronnaam geven ----------------------------------------
+
+# Definieren van de bron die wordt weergegeven in de swing metadata
+# Pas de naam tussen '' aan naar de naam die de bron heeft in je eigen SWING dashboard/databank
+bron <- 'bron swing'
+
+# 6. Indicatorenoverzicht en data inladen ---------------------------------
 
 # Sheets uit indicatorenoverzicht inladen
+# Pas de naam tussen '' aan als je het indicatorenoverzicht een andere naam hebt gegeven.
 indicatorenoverzicht <- 'Indicatorenoverzicht VO 2022.xlsx' %>%
   excel_sheets() %>%
   set_names() %>%
@@ -43,14 +83,32 @@ indicatoren <- indicatorenoverzicht[['Indicatoren']] %>%
 uitsplitsingen <- indicatorenoverzicht[['Uitsplitsingen']]
 
 # Data laden
-data <- read_spss(file = file.choose(), 
-                  col_select = c('Gemeentecode',
+# Verzet de working directory zo nodig naar de map met de data. Pas het deel tussen '' aan.
+setwd('Q:/vul/hier/de/juiste/padnaam/in')
+# Bij het laden van de data worden met het col_select argument alleen de benodigde kolommen
+# uit de data ingeladen. De gebiedsniveauvariabelen nederlandvar, regiovar en gemeentenvar
+# worden in de stap hierna aangemaakt met behulp van de opgegeven regiocode, regionaam en de
+# variabelen MIREB201 en Gemeentecode.
+# Pas de naam tussen '' aan naar de naam van jullie landelijke databestand.
+data <- read_spss('naamdatabestand.sav', 
+                  col_select = c('MIREB201', 'Gemeentecode',
                                  indicatoren$indicator[indicatoren$dichotomiseren == 0],
                                  indicatoren$indicator[indicatoren$dichotomiseren == 1] %>% str_match('.+(?=_[0-9]+$)|.+') %>% as.vector() %>% unique(),
                                  indicatoren$uitsplitsing %>% .[is.na(.) == F] %>% str_split(', ') %>% unlist() %>% unique() %>% setdiff('geen'),
-                                 indicatoren$gebiedsniveau %>% .[is.na(.) == F] %>% str_split(', ') %>% unlist() %>% unique(),
                                  indicatoren$weegfactor %>% unlist() %>% unique()))
 
+
+# 7. Databewerkingen uitvoeren --------------------------------------------
+
+# Pas nederlandvar, regiovar en gemeentenvar aan naar de gebiedsniveaus die in je eigen SWING dashboard/databank staan
+# Zorg ervoor dat de namen voor de gebiedsniveauvariabelen overeen komen met die in het indicatorenoverzicht.
+data <-  data %>%
+  mutate(totaal = 'totaal', # variabele aanmaken om het totaalgemiddelde te kunnen berekenen
+         nederlandvar = 'Nederland',
+         regiovar = ifelse(MIREB201 == regiocode, regionaam, NA), # variabele voor de regio aanmaken op basis van de eerder opgegeven regiocode en regionaam
+         gemeentenvar = ifelse(MIREB201 == regiocode, to_character(Gemeentecode), NA))
+
+# 8. Dichotomiseren -------------------------------------------------------
 
 # Variabelen dichotomiseren zoals aangegeven in het indicatorenoverzicht
 if(any(indicatoren$dichotomiseren == 1)){
@@ -59,6 +117,8 @@ if(any(indicatoren$dichotomiseren == 1)){
                      ignore_na = T)
 }
 
+
+# 9. Hercoderen -----------------------------------------------------------
 
 # Hercoderen van variabele met 8 = 'nvt' naar 0 zodat de percentages een weergave zijn van de totale groep.
 # Zijn je variabelen al correct gehercodeerd dan kun je deze stap overslaan.
@@ -70,6 +130,9 @@ data <- data %>%
                 str_detect('[Nn][\\.]?[Vv][\\.]?[Tt]') %>%
                 indicatoren$indicator[.]), list(~recode(., `8`= 0)))
 
+
+# 10. Unnesten -----------------------------------------------------------
+
 # Unnesten van indicatorenoverzicht (uitsplitsingen en gebiedsniveaus)
 analyseschema <- indicatoren %>%
   filter(filter == 0) %>%
@@ -79,8 +142,12 @@ analyseschema <- indicatoren %>%
   unnest(gebiedsniveau) %>%
   mutate(uitsplitsing = ifelse(uitsplitsing == 'geen', NA, uitsplitsing))
 
-# Functie aanmaken om gemiddelden te berekenen
-compute_mean <- function(data, indicator, naam, omschrijving, swingnaam, uitsplitsing, gebiedsniveau, weegfactor, continue, jaar, afronding, informatie){
+
+# 11. Gemiddeldes berekenen en opslaan -----------------------------------------------
+
+# Functie compute_mean aanmaken om gemiddelden te berekenen
+compute_mean <- function(data, indicator, naam = NA, omschrijving = NA, swingnaam = NA, uitsplitsing = NA, 
+                         gebiedsniveau, weegfactor, continue = 0, jaar = NA, afronding = 1, informatie = NA){
   
   variabelen <- setdiff(c(uitsplitsing, gebiedsniveau), NA)
   
@@ -117,19 +184,18 @@ compute_mean <- function(data, indicator, naam, omschrijving, swingnaam, uitspli
     zap_labels()
 }
 
-# Functie kan ook worden gebruikt om cijfers voor een enkele indicator te berekenen
-compute_mean(data = data, 
-     omschrijving = 'test',
-     naam = 'var',
-     swingnaam = 'swingnaam', 
-     indicator = 'KLGGA207_1', 
-     uitsplitsing = 'Totaal18_64', 
-     gebiedsniveau = 'MIREB201', 
-     weegfactor = 'ewCBSGGD', 
-     continue = 0, 
-     jaar = 2022,
-     afronding = 1,
-     informatie = 'pdf.pdf') %>%
+# Het volgende codeblokje hoeft niet te worden gerund, maar kan handig zijn. Zie de onderstaande uitleg.
+# De compute_mean() functie die aangemaakt wordt in de vorige stap kun je gebruiken om de cijfers voor
+# een combinatie van indicator, uitsplitsing en gebiedsniveau te berekenen. Mocht je bij het berekenen
+# van alle cijfers later in het script vastlopen dan kun je functie gebruiken om erachter te komen waar 
+# de fout zit. Stel je wilt de cijfers berekenen voor overgewicht (AGGWS204), uitgesplitst naar geslacht (AGGSA202) 
+# voor elke GGD regio (MIREB201) dan vul je als volgt de compute_mean() functie in:
+compute_mean(data = data,
+             naam = 'Overgewicht',
+             indicator = 'AGGWS204', 
+             uitsplitsing = 'AGGSA202', # Wil je niet uitsplitsen laat deze regel dan weg.
+             gebiedsniveau = 'MIREB201', 
+             weegfactor = 'ewCBSGGD') %>%
   View()
 
 
@@ -154,12 +220,14 @@ resultaten <- output %>%
                                                                                     paste(uitsplitsingen$uitsplitsing_indicator, uitsplitsingen$uitsplitsing_code))],'')))
 
 
-# Resultaten opslaan. Deze file bevat alle berekende output(gemiddelden, N, N0 en N1).
+# Verzet de working directory zo nodig naar de map waar je de nieuwe map hebt aangemaakt (zie begin van r-script). Pas het deel tussen '' aan.
+setwd('Q:/vul/hier/de/juiste/padnaam/in')
+# Resultaten opslaan als .xlsx bestand. Dit bestand bevat alle berekende output (gemiddelden, N, N0 en N1).
 write.xlsx(x = resultaten, file = paste0(mapnaam, '/', 'Resultaten.xlsx'))
 
 # Aanmaken van swing databestand
 swing_data <- resultaten %>%
-  mutate(WAARDE = ifelse(N < minimum_N | N1 < minimum_N_cel | N0 < minimum_N_cel , -99996, weighted_mean),
+  mutate(WAARDE = ifelse(N == 0 | N < minimum_N | N1 < minimum_N_cel | N0 < minimum_N_cel , -99996, weighted_mean),
          WAARDE = if_else(continue == 0 & WAARDE != -99996, WAARDE * 100, WAARDE)) %>%
   select(PERIODE = jaar, 
          GEBIEDSNIVEAU = gebiedsniveau_indicator, 
