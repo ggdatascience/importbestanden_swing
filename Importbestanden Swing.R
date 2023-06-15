@@ -39,7 +39,6 @@ minimum_N_cel <- 0
 
 
 # 3. Definieren regionaam en -code ----------------------------------------
-# KL: stap 3 stond niet in originele script > toegevoegd vanuit rapportage-script
 
 # Pas onderstaande naam en code aan naar de naam en code van je eigen regio.
 regionaam <- 'GGD Limburg-Noord'
